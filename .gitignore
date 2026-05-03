@@ -35,4 +35,6 @@ test_images
 output(1).zip
 weights/helmet*
 weights/yolo11nbest*
-weights/yolo4*
+weights/yolo4v*
+weights/yolo4v*
+
