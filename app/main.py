@@ -275,9 +275,9 @@ if source == "📸 Hình ảnh":
         with cols[0]:
             st.metric("🧍 Tổng đối tượng", stats['total'])
         with cols[1]: 
-            st.metric("🟢 Có mũ", stats['helmet'], delta_color="off") 
+            st.metric("🟢 Có mũ", stats['with helmet'], delta_color="off") 
         with cols[2]:
-            st.metric("🔴 Không mũ", stats['no_helmet'], delta_color="off")
+            st.metric("🔴 Không mũ", stats['without helmet'], delta_color="off")
         with cols[3]:
             safety_rate = (stats['helmet'] / stats['total']) * 100 if stats['total'] > 0 else 0
             st.metric("🔒 Tỷ lệ an toàn", f"{safety_rate:.1f}%")
@@ -286,8 +286,8 @@ if source == "📸 Hình ảnh":
             'Thời gian': datetime.now(),
             'Loại': 'Ảnh',
             'Tổng đối tượng': stats['total'], 
-            'Có mũ': stats['helmet'], 
-            'Không mũ': stats['no_helmet'], 
+            'Có mũ': stats['with helmet'], 
+            'Không mũ': stats['without helmet'], 
             'Tỷ lệ an toàn': f"{safety_rate:.1f}%"
         })
 
