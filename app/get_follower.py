@@ -11,7 +11,7 @@ import uvicorn
 import serial
 
 app = FastAPI(title="Helmet Detection Server")
-ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)  # Adjust port and baudrate as needed
+# ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)  # Adjust port and baudrate as needed
 violation_frame_count = 0
 serial_sent = False
 
@@ -160,13 +160,13 @@ async def upload_image(
         print("Exists:", os.path.exists(str(violation_path)))
         print("Size:", os.path.getsize(str(violation_path)))
         response = send_telegram_alert(str(violation_path), caption)
-        if violation_frame_count >= 5 and not serial_sent:
-            try:
-                ser.write(b"1")
-                print("Sent '1' to serial")
-                serial_sent = True
-            except Exception as e:
-                print("Serial send error:", e)
+        # if violation_frame_count >= 5 and not serial_sent:
+        #     try:
+        #         ser.write(b"1")
+        #         print("Sent '1' to serial")
+        #         serial_sent = True
+        #     except Exception as e:
+        #         print("Serial send error:", e)
 
         return JSONResponse({
             "status": "violation",
