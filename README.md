@@ -13,3 +13,5 @@ python3 get_follower.py
 ```bash
 python3 stream_cam.py
 ```
+
+note: có thể chọn các model để thử và sửa trong file main.py hàm load_model để test
