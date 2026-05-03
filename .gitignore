@@ -25,7 +25,6 @@ dist/
 *.spec
 
 # Streamlit cache (nếu chạy nhiều lần)
-.streamlit/
 
 # Test Reports
 reports/
