@@ -32,3 +32,7 @@ reports/
 output(1)
 **/BaoCaoDATN/
 test_images
+output(1).zip
+weights/helmet*
+weights/yolo11nbest*
+weights/yolo4*
