@@ -22,3 +22,7 @@ https://docs.google.com/document/d/1OGyP9PB3Mf1sXo3G92eeTDPp3rCS0YWb/edit?usp=sh
 
 ### Sử dụng app IP CAMERA trên android để stream camera
 thay đổi ip trong code stream_cam.py đúng với ip hiển thị trong app
+
+### gửi qua telegram
+tạo file .env trong thư mục app trong đó có: TELEGRAM_TOKEN=token
+                                              TELEGRAM_CHAT_ID=chat_id
