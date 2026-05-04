@@ -22,7 +22,7 @@ MODEL_PATH = "../weights/bestyolo.pt"
 UPLOAD_DIR = Path("uploads")
 VIOLATION_DIR = Path("violations")
 DB_PATH = "violations.db"
-CONF_THRESH = 0.6
+CONF_THRESH = 0.2
 
 # Telegram config (optional) via environment variables
 import os
