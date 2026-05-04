@@ -26,3 +26,19 @@ thay đổi ip trong code stream_cam.py đúng với ip hiển thị trong app
 ### gửi qua telegram
 tạo file .env trong thư mục app trong đó có: TELEGRAM_TOKEN=token
                                               TELEGRAM_CHAT_ID=chat_id
+
+## Chạy theo video path
+
+terminal 1:
+
+```bash
+cd app
+python3 get_follower.py
+```
+
+terminal 2:
+
+```bash
+cd app
+python3 stream_video.py
+```
