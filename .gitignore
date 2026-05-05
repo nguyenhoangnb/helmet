@@ -37,3 +37,6 @@ weights/yolo11nbest*
 weights/yolo4v*
 weights/yolo4v*
 
+zalo_profile
+
+app/test*
