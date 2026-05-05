@@ -33,7 +33,7 @@ terminal 1:
 
 ```bash
 cd app
-python3 get_follower.py
+python3 server.py
 ```
 
 terminal 2:
