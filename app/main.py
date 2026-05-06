@@ -9,6 +9,13 @@ import pandas as pd
 from datetime import datetime
 import time
 
+
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 # CSS
 def load_css():
     st.markdown("""
@@ -53,6 +60,7 @@ def draw_boxes(image, results, actual_fps=None, font_scale_base=0.5):
     frame_height, frame_width, _ = image.shape
     font_scale = font_scale_base * (frame_width / 640)*1.2
     thickness = max(1, int(frame_width / 640 * 2.5)) 
+    violation_detected = False
 
     for box in boxes:
         x1, y1, x2, y2 = map(int, box.xyxy[0])
