@@ -279,6 +279,125 @@ def process_video(video_path, confidence_threshold, iou_threshold, skip_frames=5
 
     return stats
 
+# Xử lý Camera Stream
+def process_stream(stream_url, confidence_threshold, iou_threshold, duration=60):
+    """
+    Xử lý stream camera từ URL
+    :param stream_url: URL của stream camera
+    :param confidence_threshold: Ngưỡng tin cậy
+    :param iou_threshold: Ngưỡng IoU
+    :param duration: Thời gian stream (giây)
+    """
+    cap = cv2.VideoCapture(stream_url)
+    if not cap.isOpened():
+        st.error(f"❌ Không thể kết nối tới stream: {stream_url}")
+        return None
+
+    stframe = st.empty()
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    stats = {
+        'total_frames': 0,
+        'helmet_counts': [],
+        'no_helmet_counts': [],
+        'fps_list': [],
+        'start_time': datetime.now()
+    }
+    
+    frame_count = 0
+    start_time = time.time()
+    
+    status_text.info(f"🔴 Đang stream từ camera (tối đa {duration} giây)...")
+    
+    try:
+        while True:
+            # Kiểm tra thời gian
+            elapsed_time = time.time() - start_time
+            if elapsed_time > duration:
+                break
+            
+            ret, frame = cap.read()
+            if not ret:
+                st.warning("⚠️ Lỗi: Không thể đọc frame từ stream hoặc stream đã kết thúc")
+                break
+            
+            frame_count += 1
+            
+            start = time.time()
+            # Thay đổi kích thước khung hình
+            resized_frame = cv2.resize(frame, (640, 480))
+            
+            # Thực hiện suy luận (inference)
+            results = model(resized_frame, verbose=False, conf=confidence_threshold, iou=iou_threshold)[0]
+            actual_fps = 1.0 / (time.time() - start)
+            
+            # Vẽ các hộp và hiển thị FPS
+            annotated_frame, frame_stats = draw_boxes(resized_frame.copy(), results, actual_fps=actual_fps)
+            
+            stats['helmet_counts'].append(frame_stats['with helmet'])
+            stats['no_helmet_counts'].append(frame_stats['without helmet'])
+            stats['fps_list'].append(actual_fps * 3)
+            stats['total_frames'] += 1
+            
+            # Hiển thị khung hình đã được chú thích
+            stframe.image(annotated_frame, channels="BGR", width="stretch")
+            
+            # Cập nhật thanh tiến trình
+            progress_percent = min(elapsed_time / duration, 1.0)
+            progress_bar.progress(progress_percent)
+            
+            remaining_time = duration - elapsed_time
+            status_text.info(f"🔴 Đang stream... {progress_percent*100:.1f}% | Thời gian còn: {remaining_time:.1f}s | Frame: {frame_count}")
+    
+    except Exception as e:
+        st.error(f"❌ Lỗi khi xử lý stream: {str(e)}")
+    
+    finally:
+        cap.release()
+    
+    stats['processing_time'] = datetime.now() - stats['start_time']
+    status_text.success(f"✅ Stream kết thúc! Thời gian: {stats['processing_time'].seconds} giây | Tổng frame: {frame_count}")
+    
+    # Tính toán thống kê tổng thể
+    if stats['total_frames'] > 0:
+        total_helmet = sum(stats['helmet_counts'])
+        total_no_helmet = sum(stats['no_helmet_counts'])
+        total_objects = total_helmet + total_no_helmet
+        avg_fps = np.mean(stats['fps_list']) if stats['fps_list'] else 0
+        safety_rate = (total_helmet / total_objects * 100) if total_objects > 0 else 0
+        
+        # Hiển thị thống kê stream
+        st.markdown("### 📊 Thống kê stream")
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        
+        with col1:
+            st.metric("🧍 Tổng đối tượng", f"{total_objects}")
+        with col2:
+            st.metric("🟢 Có mũ", f"{total_helmet}")
+        with col3:
+            st.metric("🔴 Không mũ", f"{total_no_helmet}")
+        with col4:
+            st.metric("🔒 Tỷ lệ an toàn", f"{safety_rate:.2f}%")
+        with col5:
+            st.metric("🎞️ Tổng frame", f"{stats['total_frames']}")
+        with col6:
+            st.metric("⚡ FPS trung bình", f"{avg_fps:.2f}")
+        
+        # Lưu lại dữ liệu báo cáo
+        st.session_state.report_data.append({
+            'Thời gian': stats['start_time'],
+            'Loại': 'Stream Camera',
+            'Tổng đối tượng': total_objects,
+            'Có mũ': total_helmet,
+            'Không mũ': total_no_helmet,
+            'Tỷ lệ an toàn': f"{safety_rate:.2f}%",
+            'Tổng frame': stats['total_frames'],
+            'FPS trung bình': f"{avg_fps:.2f}"
+        })
+    
+    return stats
+
 # ======================== XUẤT BÁO CÁO ========================
 def generate_report():
     df = pd.DataFrame(st.session_state.report_data)
@@ -314,7 +433,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-source = st.radio("Chọn nguồn dữ liệu:", ["📸 Hình ảnh", "🎥 Video"], horizontal=True, index =0)
+source = st.radio("Chọn nguồn dữ liệu:", ["📸 Hình ảnh", "🎥 Video", "📹 Camera Stream"], horizontal=True, index =0)
 
 if source == "📸 Hình ảnh":
     file = st.file_uploader("Tải ảnh lên", type=["jpg", "jpeg", "png"], 
@@ -366,6 +485,28 @@ elif source == "🎥 Video":
             os.remove(path)
         except: 
             pass
+
+elif source == "📹 Camera Stream":
+    st.subheader("🔴 Stream từ Camera")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        stream_url = st.text_input(
+            "URL Stream Camera",
+            value=STREAM_URL,
+            help="Nhập địa chỉ URL của camera stream (ví dụ: http://192.168.1.91:8080/video)"
+        )
+    with col2:
+        stream_duration = st.slider("Thời gian stream (giây)", 10, 300, 60, 10)
+    with col3:
+        start_stream = st.button("▶️ Bắt đầu Stream", type="primary", use_container_width=True)
+    
+    if start_stream:
+        if stream_url:
+            st.info(f"📡 Kết nối tới: {stream_url}")
+            stats = process_stream(stream_url, confidence_threshold, iou_threshold, stream_duration)
+        else:
+            st.error("❌ Vui lòng nhập URL stream camera")
 
 # Thống kê tổng quan
 if st.session_state.report_data:
