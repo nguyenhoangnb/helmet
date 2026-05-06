@@ -8,8 +8,15 @@ from PIL import Image
 import pandas as pd
 from datetime import datetime
 import time
+import requests
+import threading
+from dotenv import load_dotenv
 
 # CSS
+
+load_dotenv()
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 STREAM_URL = "http://192.168.1.91:8080/video"
 
@@ -90,7 +97,7 @@ def draw_boxes(image, results, actual_fps=None, font_scale_base=0.5):
         count = 0
         violation_path = VIOLATION_DIR / f"violation_{timestamp}.jpg"
         cv2.imwrite(str(violation_path), image)
-        send_telegram_alert(str(violation_path), "⚠️ Vi phạm không đội mũ bảo hiểm!")
+        send_telegram_alert_async(str(violation_path), "⚠️ Vi phạm không đội mũ bảo hiểm!")
 
     # Tạo lớp phủ thống kê ở góc trên bên trái
     if actual_fps is not None:
@@ -171,6 +178,15 @@ def send_telegram_alert(photo_path, caption):
     except Exception as e:
         print("Telegram send error:", e)
         return False
+
+def send_telegram_alert_async(photo_path, caption):
+    """Gửi cảnh báo Telegram trong thread riêng để không làm chậm xử lý"""
+    thread = threading.Thread(
+        target=send_telegram_alert,
+        args=(photo_path, caption),
+        daemon=True
+    )
+    thread.start()
 
 # Xử lý Video
 def process_video(video_path, confidence_threshold, iou_threshold, skip_frames=5): 

@@ -9,6 +9,7 @@ import pandas as pd
 from datetime import datetime
 import time
 import requests
+import threading
 
 
 
@@ -69,7 +70,7 @@ def draw_boxes(image, results, actual_fps=None, font_scale_base=0.5):
         conf = float(box.conf[0])
         cls_id = int(box.cls[0])
         label = class_names[cls_id]
-        print(f'Detected: {label} with confidence {conf:.2f} at [{x1}, {y1}, {x2}, {y2}]')
+        # print(f'Detected: {label} with confidence {conf:.2f} at [{x1}, {y1}, {x2}, {y2}]')
         if cls_id == 1 and conf > 0.5:
             count += 1
             violation_detected = True
@@ -97,7 +98,7 @@ def draw_boxes(image, results, actual_fps=None, font_scale_base=0.5):
         count = 0
         violation_path = VIOLATION_DIR / f"violation_{timestamp}.jpg"
         cv2.imwrite(str(violation_path), image)
-        send_telegram_alert(str(violation_path), "⚠️ Vi phạm không đội mũ bảo hiểm!")
+        send_telegram_alert_async(str(violation_path), "⚠️ Vi phạm không đội mũ bảo hiểm!")
 
     # Tạo lớp phủ thống kê ở góc trên bên trái
     if actual_fps is not None:
@@ -178,6 +179,15 @@ def send_telegram_alert(photo_path, caption):
     except Exception as e:
         print("Telegram send error:", e)
         return False
+
+def send_telegram_alert_async(photo_path, caption):
+    """Gửi cảnh báo Telegram trong thread riêng để không làm chậm xử lý"""
+    thread = threading.Thread(
+        target=send_telegram_alert,
+        args=(photo_path, caption),
+        daemon=True
+    )
+    thread.start()
 
 # Xử lý Video
 def process_video(video_path, confidence_threshold, iou_threshold, skip_frames=5): 
