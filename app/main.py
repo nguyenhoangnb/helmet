@@ -19,6 +19,11 @@ from dotenv import load_dotenv
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+ALERT_COOLDOWN = 1  # Gửi tối đa 1 cảnh báo mỗi 1 giây
+
+# Biến toàn cầu để lưu thời gian alert cuối cùng (không bị reset)
+_alert_history = {}  # {video_hash: last_time}
+
 # CSS
 def load_css():
     st.markdown("""
@@ -38,6 +43,8 @@ load_css()
 # ======================== TRẠNG THÁI BAN ĐẦU ========================
 if 'report_data' not in st.session_state:
     st.session_state.report_data = []
+if 'last_alert_time' not in st.session_state:
+    st.session_state.last_alert_time = 0
 
 # Tải model
 @st.cache_resource
@@ -169,25 +176,50 @@ def send_telegram_alert(photo_path, caption):
                 timeout=30
             )
 
-        print("Telegram response:", response.status_code)
-        print("Telegram body:", response.text)
-
+        print(f"[TELEGRAM] Response: {response.status_code}")
         if response.status_code == 200:
+            print(f"[TELEGRAM] ✅ Alert sent successfully!")
             return True
+        print(f"[TELEGRAM] ❌ Failed: {response.text}")
         return False
 
     except Exception as e:
-        print("Telegram send error:", e)
+        print(f"[TELEGRAM] ❌ Error: {e}")
         return False
 
 def send_telegram_alert_async(photo_path, caption):
-    """Gửi cảnh báo Telegram trong thread riêng để không làm chậm xử lý"""
+    """Gửi cảnh báo Telegram với cooldown toàn cầu (không bị Streamlit reset)"""
+    global _alert_history
+    
+    current_time = time.time()
+    # Sử dụng default cooldown nếu chưa từng gửi
+    last_alert = _alert_history.get("global", 0)
+    
+    # Kiểm tra cooldown
+    if current_time - last_alert < ALERT_COOLDOWN:
+        remaining = ALERT_COOLDOWN - (current_time - last_alert)
+        print(f"[ALERT] ⏳ Cooldown active ({remaining:.1f}s remaining). Skipping alert.")
+        return
+    
+    # Cập nhật thời gian alert
+    _alert_history["global"] = current_time
+    print(f"[ALERT] 🚀 Starting telegram alert thread...")
+    
+    # Gửi trong thread riêng (không chặn xử lý video)
+    def send_with_logging():
+        try:
+            print(f"[THREAD] 🧵 Thread started (ID: {threading.current_thread().ident})")
+            send_telegram_alert(photo_path, caption)
+            print(f"[THREAD] ✅ Thread completed (ID: {threading.current_thread().ident})")
+        except Exception as e:
+            print(f"[THREAD] ❌ Thread error: {e}")
+    
     thread = threading.Thread(
-        target=send_telegram_alert,
-        args=(photo_path, caption),
+        target=send_with_logging,
         daemon=True
     )
     thread.start()
+    print(f"[ALERT] 🔔 Alert thread created and started (Daemon: True)")
 
 # Xử lý Video
 def process_video(video_path, confidence_threshold, iou_threshold, skip_frames=5): 
@@ -313,6 +345,26 @@ with st.sidebar:
     st.markdown("### 🔧 Thông số mô hình")
     confidence_threshold = st.slider("Ngưỡng tin cậy", 0.1, 1.0, 0.5, 0.05)
     iou_threshold = st.slider("Ngưỡng IoU", 0.1, 1.0, 0.4, 0.05)
+    
+    st.markdown("---")
+    st.markdown("### 🔔 Cảnh báo Telegram")
+    
+    # Hiển thị trạng thái cooldown từ biến global
+    current_time = time.time()
+    last_alert = _alert_history.get("global", 0)
+    time_since_last_alert = current_time - last_alert
+    
+    if time_since_last_alert < ALERT_COOLDOWN:
+        remaining_time = ALERT_COOLDOWN - time_since_last_alert
+        st.warning(f"⏳ Cooldown active: {remaining_time:.1f}s remaining")
+    else:
+        st.success("✅ Alert ready to send")
+    
+    # Button reset cooldown
+    if st.button("🔄 Reset Cooldown", use_container_width=True):
+        _alert_history["global"] = 0
+        st.success("✅ Cooldown reset!")
+        st.rerun()
     
     st.markdown("---")
     st.markdown("### ℹ️ Thông tin")

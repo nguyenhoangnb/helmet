@@ -3,6 +3,11 @@
 streamlit run app/main.py
 ```
 
+### TEST2
+```bash
+streamlit run app/processing.py
+```
+
 ## run sever
 ```bash
 python3 get_follower.py
