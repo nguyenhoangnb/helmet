@@ -37,8 +37,16 @@ def load_model():
 
 model = load_model()
 
+
+count = 0
+from pathlib import Path
+
+VIOLATION_DIR = Path("violations")
+VIOLATION_DIR.mkdir(exist_ok=True)
+
 # Vẽ bounding box 
 def draw_boxes(image, results, actual_fps=None, font_scale_base=0.5):
+    global count
     class_names = results.names
     boxes = results.boxes
     stats = {'total': 0, 'with helmet': 0, 'without helmet': 0, 'confidences': []}
@@ -52,7 +60,10 @@ def draw_boxes(image, results, actual_fps=None, font_scale_base=0.5):
         cls_id = int(box.cls[0])
         label = class_names[cls_id]
         print(f'Detected: {label} with confidence {conf:.2f} at [{x1}, {y1}, {x2}, {y2}]')
-
+        if cls_id == 1 and conf > 0.5:
+            count += 1
+            violation_detected = True
+            
         color = (0, 255, 0) if label == 'with helmet' else (0, 0, 255)
         cv2.rectangle(image, (x1, y1), (x2, y2), color, thickness)
         
@@ -70,7 +81,14 @@ def draw_boxes(image, results, actual_fps=None, font_scale_base=0.5):
         stats['with helmet'] += int(label == 'with helmet')
         stats['without helmet'] += int(label == 'without helmet')
         stats['confidences'].append(conf)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
+    if count == 2 and violation_detected:
+        count = 0
+        violation_path = VIOLATION_DIR / f"violation_{timestamp}.jpg"
+        cv2.imwrite(str(violation_path), image)
+        send_telegram_alert(str(violation_path), "⚠️ Vi phạm không đội mũ bảo hiểm!")
+
     # Tạo lớp phủ thống kê ở góc trên bên trái
     if actual_fps is not None:
         # Kích thước và vị trí hộp thống kê
@@ -113,6 +131,44 @@ def process_image(image, confidence_threshold, iou_threshold):
         annotated_image, stats = draw_boxes(image_bgr, results)
         return cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB), stats
 
+
+
+def send_telegram_alert(photo_path, caption):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Missing token/chat_id")
+        return False
+
+    if not os.path.exists(photo_path):
+        print("Photo not found:", photo_path)
+        return False
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+
+    try:
+        with open(photo_path, "rb") as photo:
+            response = requests.post(
+                url,
+                data={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "caption": caption
+                },
+                files={
+                    "photo": photo
+                },
+                timeout=30
+            )
+
+        print("Telegram response:", response.status_code)
+        print("Telegram body:", response.text)
+
+        if response.status_code == 200:
+            return True
+        return False
+
+    except Exception as e:
+        print("Telegram send error:", e)
+        return False
+
 # Xử lý Video
 def process_video(video_path, confidence_threshold, iou_threshold, skip_frames=5): 
     cap = cv2.VideoCapture(video_path)
@@ -150,6 +206,7 @@ def process_video(video_path, confidence_threshold, iou_threshold, skip_frames=5
             progress_bar.progress(progress_percent)
             status_text.info(f"Đang xử lý... {progress_percent*100:.1f}% hoàn thành")
             continue
+        
 
         start = time.time()
         # Thay đổi kích thước khung hình 
@@ -162,6 +219,7 @@ def process_video(video_path, confidence_threshold, iou_threshold, skip_frames=5
 
         # Vẽ các hộp và hiển thị FPS
         annotated_frame, frame_stats = draw_boxes(resized_frame.copy(), results, actual_fps=actual_fps)
+
 
         stats['helmet_counts'].append(frame_stats['with helmet'])
         stats['no_helmet_counts'].append(frame_stats['without helmet'])
