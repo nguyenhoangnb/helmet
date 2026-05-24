@@ -1,6 +1,10 @@
+# Conda environment: robot_env
 streamlit>=1.34.0
 opencv-python>=4.9.0.80
 numpy>=1.24.0
 ultralytics>=8.0.20
 Pillow>=9.5.0
 pandas>=2.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+web3>=6.20.0
