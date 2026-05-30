@@ -1,6 +1,7 @@
 import streamlit as st
 import tempfile
 import os
+import sys
 import hashlib
 import sqlite3
 from ultralytics import YOLO
@@ -20,6 +21,30 @@ import os
 from dotenv import load_dotenv
 
 APP_DIR = Path(__file__).resolve().parent
+
+
+def ensure_streamlit_runtime():
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+    except Exception:
+        return
+
+    if __name__ == "__main__" and get_script_run_ctx() is None:
+        os.execv(
+            sys.executable,
+            [
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                str(Path(__file__).resolve()),
+                *sys.argv[1:],
+            ],
+        )
+
+
+ensure_streamlit_runtime()
+
 load_dotenv(APP_DIR / ".env")
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
@@ -33,6 +58,7 @@ ALERT_COOLDOWN = 1  # Gửi tối đa 1 cảnh báo mỗi 1 giây
 
 # Biến toàn cầu để lưu thời gian alert cuối cùng (không bị reset)
 _alert_history = {}  # {video_hash: last_time}
+_last_telegram_status = {"ok": None, "message": "Chưa gửi cảnh báo"}
 
 # CSS
 def load_css():
@@ -67,6 +93,24 @@ def load_css():
     section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
     section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] li {
         color: #cbd5e1;
+    }
+
+    .stApp label,
+    .stApp p,
+    .stApp span,
+    .stApp div[data-testid="stMarkdownContainer"],
+    .stApp div[data-testid="stMetricLabel"],
+    .stApp div[data-testid="stMetricValue"],
+    .stApp div[data-testid="stFileUploader"] small {
+        color: #0f172a;
+    }
+
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"],
+    section[data-testid="stSidebar"] div[data-testid="stMetricLabel"],
+    section[data-testid="stSidebar"] div[data-testid="stMetricValue"] {
+        color: #e5e7eb;
     }
 
     .block-container {
@@ -174,6 +218,10 @@ def load_css():
         background: rgba(255, 255, 255, 0.78);
         color: #334155;
         font-weight: 700;
+    }
+
+    .stTabs [data-baseweb="tab"] p {
+        color: inherit;
     }
 
     .stTabs [aria-selected="true"] {
@@ -373,6 +421,65 @@ def build_transaction_url(tx_hash):
 
 init_violation_db()
 
+
+def normalize_class_name(label):
+    return str(label).strip().lower().replace("_", " ").replace("-", " ")
+
+
+def is_no_helmet_class(cls_id, label):
+    normalized_label = normalize_class_name(label)
+    no_helmet_terms = (
+        "without helmet",
+        "no helmet",
+        "nohelmet",
+        "khong mu",
+        "không mũ",
+    )
+    helmet_terms = (
+        "with helmet",
+        "helmet",
+        "co mu",
+        "có mũ",
+    )
+    if any(term in normalized_label for term in no_helmet_terms):
+        return True
+    if any(term in normalized_label for term in helmet_terms):
+        return False
+    return (
+        cls_id == 1
+    )
+
+
+def draw_confidence_label(image, x1, y1, conf, color, font_scale, thickness):
+    text = f"{conf:.2f}"
+    (text_width, text_height), baseline = cv2.getTextSize(
+        text,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        font_scale,
+        thickness,
+    )
+    frame_height, frame_width = image.shape[:2]
+    padding = 5
+    label_height = text_height + baseline + padding * 2
+    label_width = text_width + padding * 2
+    label_x1 = max(0, min(x1, frame_width - label_width))
+    label_y1 = y1 - label_height if y1 - label_height >= 0 else y1
+    label_y1 = max(0, min(label_y1, frame_height - label_height))
+    label_x2 = min(frame_width, label_x1 + label_width)
+    label_y2 = min(frame_height, label_y1 + label_height)
+
+    cv2.rectangle(image, (label_x1, label_y1), (label_x2, label_y2), color, -1)
+    cv2.putText(
+        image,
+        text,
+        (label_x1 + padding, label_y2 - baseline - padding),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        font_scale,
+        (255, 255, 255),
+        thickness,
+    )
+
+
 # Vẽ bounding box 
 def draw_boxes(image, results, actual_fps=None, font_scale_base=0.5):
     global count
@@ -391,27 +498,20 @@ def draw_boxes(image, results, actual_fps=None, font_scale_base=0.5):
         cls_id = int(box.cls[0])
         label = class_names[cls_id]
         # print(f'Detected: {label} with confidence {conf:.2f} at [{x1}, {y1}, {x2}, {y2}]')
-        if cls_id == 1 and conf > 0.5:
+        no_helmet_detected = is_no_helmet_class(cls_id, label)
+        if no_helmet_detected and conf > 0.5:
             count += 1
             violation_detected = True
             best_violation_confidence = max(best_violation_confidence, conf)
             
-        color = (0, 255, 0) if label == 'with helmet' else (0, 0, 255)
+        color = (0, 0, 255) if no_helmet_detected else (0, 255, 0)
         cv2.rectangle(image, (x1, y1), (x2, y2), color, thickness)
-        
-        # Cải thiện nền chữ để dễ đọc hơn
-        (text_width, text_height), _ = cv2.getTextSize(f"{label} {conf:.2f}", 
-                                                      cv2.FONT_HERSHEY_SIMPLEX, 
-                                                      font_scale, thickness)
-        cv2.rectangle(image, (x1, y1 - text_height - 10), 
-                      (x1 + text_width, y1), color, -1)
-        cv2.putText(image, f"{label} {conf:.2f}", (x1, y1 - 5), 
-                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), thickness)
+        draw_confidence_label(image, x1, y1, conf, color, font_scale, thickness)
         
         # Hiển thị thông tin thống kê lên ảnh
         stats['total'] += 1
-        stats['with helmet'] += int(label == 'with helmet')
-        stats['without helmet'] += int(label == 'without helmet')
+        stats['with helmet'] += int(not no_helmet_detected)
+        stats['without helmet'] += int(no_helmet_detected)
         stats['confidences'].append(conf)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
@@ -478,12 +578,22 @@ def process_image(image, confidence_threshold, iou_threshold):
 
 
 def send_telegram_alert(photo_path, caption):
+    global _last_telegram_status
+
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Missing token/chat_id")
+        _last_telegram_status = {
+            "ok": False,
+            "message": "Thiếu TELEGRAM_TOKEN hoặc TELEGRAM_CHAT_ID trong app/.env",
+        }
+        print(f"[TELEGRAM] ❌ {_last_telegram_status['message']}")
         return False
 
     if not os.path.exists(photo_path):
-        print("Photo not found:", photo_path)
+        _last_telegram_status = {
+            "ok": False,
+            "message": f"Không tìm thấy ảnh gửi Telegram: {photo_path}",
+        }
+        print(f"[TELEGRAM] ❌ {_last_telegram_status['message']}")
         return False
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
@@ -504,13 +614,26 @@ def send_telegram_alert(photo_path, caption):
 
         print(f"[TELEGRAM] Response: {response.status_code}")
         if response.status_code == 200:
-            print(f"[TELEGRAM] ✅ Alert sent successfully!")
+            _last_telegram_status = {
+                "ok": True,
+                "message": f"Đã gửi cảnh báo lúc {datetime.now().strftime('%H:%M:%S')}",
+            }
+            print(f"[TELEGRAM] ✅ {_last_telegram_status['message']}")
             return True
-        print(f"[TELEGRAM] ❌ Failed: {response.text}")
+        error_message = response.text[:250]
+        _last_telegram_status = {
+            "ok": False,
+            "message": f"Lỗi Telegram {response.status_code}: {error_message}",
+        }
+        print(f"[TELEGRAM] ❌ {_last_telegram_status['message']}")
         return False
 
     except Exception as e:
-        print(f"[TELEGRAM] ❌ Error: {e}")
+        _last_telegram_status = {
+            "ok": False,
+            "message": f"Lỗi kết nối Telegram: {e}",
+        }
+        print(f"[TELEGRAM] ❌ {_last_telegram_status['message']}")
         return False
 
 def send_telegram_alert_async(photo_path, caption):
@@ -526,9 +649,11 @@ def send_telegram_alert_async(photo_path, caption):
         remaining = ALERT_COOLDOWN - (current_time - last_alert)
         print(f"[ALERT] ⏳ Cooldown active ({remaining:.1f}s remaining). Skipping alert.")
         return
-    
-    # Cập nhật thời gian alert
-    _alert_history["global"] = current_time
+
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        send_telegram_alert(photo_path, caption)
+        return
+
     print(f"[ALERT] 🚀 Starting telegram alert thread...")
     
     # Gửi trong thread riêng (không chặn xử lý video)
@@ -545,6 +670,7 @@ def send_telegram_alert_async(photo_path, caption):
         daemon=True
     )
     thread.start()
+    _alert_history["global"] = current_time
     print(f"[ALERT] 🔔 Alert thread created and started (Daemon: True)")
 
 # Xử lý Video
@@ -703,6 +829,12 @@ with st.sidebar:
     - Blockchain/IPFS: Web3 + IPFS placeholder
     """)
     st.caption(f"Telegram: {telegram_status}")
+    if _last_telegram_status["ok"] is True:
+        st.success(_last_telegram_status["message"])
+    elif _last_telegram_status["ok"] is False:
+        st.error(_last_telegram_status["message"])
+    else:
+        st.caption(_last_telegram_status["message"])
     st.caption(f"Blockchain: {blockchain_status}")
 
 # ======================== GIAO DIỆN CHÍNH ========================
