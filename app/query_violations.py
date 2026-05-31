@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import sqlite3
 from pathlib import Path
 
@@ -40,6 +41,14 @@ def format_value(value):
     if value is None:
         return ""
     return str(value)
+
+
+def calculate_sha256(file_path):
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
 
 
 def latest(conn, limit):
@@ -121,6 +130,45 @@ def search_hash(conn, hash_text):
     print_rows(rows)
 
 
+def verify_image_by_hash(conn, hash_text):
+    rows = conn.execute(
+        """
+        SELECT id, timestamp, image_hash, blockchain_tx, image_path
+        FROM violations
+        WHERE image_hash LIKE ?
+           OR blockchain_tx LIKE ?
+        ORDER BY id DESC
+        """,
+        (f"%{hash_text}%", f"%{hash_text}%"),
+    ).fetchall()
+
+    verified_rows = []
+    for row in rows:
+        image_path = Path(format_value(row["image_path"]))
+        stored_hash = format_value(row["image_hash"])
+        current_hash = ""
+
+        if not image_path.exists():
+            status = "MISSING_FILE"
+        elif not stored_hash:
+            status = "NO_STORED_HASH"
+            current_hash = calculate_sha256(image_path)
+        else:
+            current_hash = calculate_sha256(image_path)
+            status = "MATCH" if current_hash == stored_hash else "MISMATCH"
+
+        verified_rows.append({
+            "id": row["id"],
+            "timestamp": row["timestamp"],
+            "status": status,
+            "stored_hash": stored_hash,
+            "current_hash": current_hash,
+            "image_path": row["image_path"],
+        })
+
+    print_rows(verified_rows)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Query helmet violation records from SQLite."
@@ -146,6 +194,12 @@ def parse_args():
     search_parser = subparsers.add_parser("search-hash", help="Search by hash/tx text.")
     search_parser.add_argument("text")
 
+    verify_parser = subparsers.add_parser(
+        "verify-image",
+        help="Find image by hash/tx text and compare file SHA-256.",
+    )
+    verify_parser.add_argument("text")
+
     return parser.parse_args()
 
 
@@ -166,6 +220,8 @@ def main():
             detail(conn, args.id)
         elif args.command == "search-hash":
             search_hash(conn, args.text)
+        elif args.command == "verify-image":
+            verify_image_by_hash(conn, args.text)
 
 
 if __name__ == "__main__":
