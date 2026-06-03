@@ -15,12 +15,23 @@ import requests
 import threading
 from pathlib import Path
 
+APP_DIR = Path(__file__).resolve().parent
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
+
+from violation_ui import (
+    dashboard_counts,
+    load_violations as load_violation_records,
+    normalize_df as normalize_violation_df,
+    render_sidebar_navigation,
+    resolve_image_path,
+    stats_by_date,
+)
+
 
 
 import os
 from dotenv import load_dotenv
-
-APP_DIR = Path(__file__).resolve().parent
 
 
 def ensure_streamlit_runtime():
@@ -66,27 +77,48 @@ def load_css():
     <style>
     :root {
         --surface: #ffffff;
-        --surface-soft: #f6f8fb;
-        --border: #d9e2ec;
-        --text-muted: #667085;
-        --accent: #2563eb;
-        --danger: #dc2626;
-        --success: #16a34a;
+        --surface-soft: #f0f9ff;
+        --border: #bae6fd;
+        --border-hover: #7dd3fc;
+        --text-main: #1f2937;
+        --text-muted: #475569;
+        --accent: #0ea5e9;
+        --accent-hover: #0284c7;
+        --danger: #ef4444;
+        --success: #10b981;
+        --card-bg: rgba(255, 255, 255, 0.85);
+        --card-shadow: 0 10px 30px rgba(14, 165, 233, 0.08);
     }
 
     .stApp {
         background:
-            radial-gradient(circle at 12% 8%, rgba(37, 99, 235, 0.12), transparent 30%),
-            linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-        color: #101828;
+            radial-gradient(circle at 12% 8%, rgba(14, 165, 233, 0.15), transparent 40%),
+            radial-gradient(circle at 80% 85%, rgba(56, 189, 248, 0.12), transparent 40%),
+            linear-gradient(180deg, #f0f9ff 0%, #e0f2fe 100%);
+        color: var(--text-main);
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
 
     section[data-testid="stSidebar"] {
-        background: #0f172a;
+        background: #1f2937;
+        border-right: 1px solid rgba(14, 165, 233, 0.2);
     }
 
     section[data-testid="stSidebar"] * {
+        color: #f1f5f9;
+    }
+
+    section[data-testid="stSidebar"] div[data-testid="stSidebarNav"] {
+        display: none;
+    }
+
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a {
+        border-radius: 8px;
         color: #e5e7eb;
+    }
+
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a:hover {
+        background: #334155;
     }
 
     section[data-testid="stSidebar"] .stSlider p,
@@ -102,7 +134,7 @@ def load_css():
     .stApp div[data-testid="stMetricLabel"],
     .stApp div[data-testid="stMetricValue"],
     .stApp div[data-testid="stFileUploader"] small {
-        color: #0f172a;
+        color: var(--text-main);
     }
 
     section[data-testid="stSidebar"] label,
@@ -110,7 +142,7 @@ def load_css():
     section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"],
     section[data-testid="stSidebar"] div[data-testid="stMetricLabel"],
     section[data-testid="stSidebar"] div[data-testid="stMetricValue"] {
-        color: #e5e7eb;
+        color: #f1f5f9;
     }
 
     .block-container {
@@ -120,104 +152,168 @@ def load_css():
     }
 
     .app-hero {
-        margin-bottom: 1.25rem;
-        padding: 1.35rem 1.5rem;
+        margin-bottom: 1.5rem;
+        padding: 1.75rem 2rem;
         border: 1px solid var(--border);
-        border-radius: 8px;
-        background: rgba(255, 255, 255, 0.9);
-        box-shadow: 0 16px 45px rgba(15, 23, 42, 0.08);
+        border-radius: 12px;
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(224, 242, 254, 0.6) 100%);
+        backdrop-filter: blur(8px);
+        box-shadow: var(--card-shadow);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .app-hero::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 4px;
+        height: 100%;
+        background: linear-gradient(180deg, #0ea5e9 0%, #38bdf8 100%);
     }
 
     .app-kicker {
         margin: 0 0 0.35rem;
         color: var(--accent);
-        font-size: 0.86rem;
+        font-size: 0.88rem;
         font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0;
+        letter-spacing: 0.1em;
     }
 
     .app-title {
         margin: 0;
-        color: #0f172a;
-        font-size: 2.1rem;
-        line-height: 1.15;
+        color: #1f2937;
+        font-size: 2.2rem;
+        line-height: 1.2;
         font-weight: 800;
-        letter-spacing: 0;
+        letter-spacing: -0.02em;
     }
 
     .app-subtitle {
-        max-width: 760px;
-        margin: 0.6rem 0 0;
+        max-width: 800px;
+        margin: 0.75rem 0 0;
         color: var(--text-muted);
-        font-size: 1rem;
-        line-height: 1.55;
+        font-size: 1.05rem;
+        line-height: 1.6;
     }
 
     .status-row {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-        gap: 0.75rem;
-        margin: 1rem 0 1.25rem;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.85rem;
+        margin: 1.25rem 0 1.5rem;
     }
 
     .status-item {
-        padding: 0.85rem 1rem;
+        padding: 1rem 1.25rem;
         border: 1px solid var(--border);
-        border-radius: 8px;
-        background: rgba(255, 255, 255, 0.82);
+        border-radius: 12px;
+        background: var(--card-bg);
+        box-shadow: 0 4px 15px rgba(15, 23, 42, 0.03);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        backdrop-filter: blur(8px);
+    }
+
+    .status-item:hover {
+        transform: translateY(-3px);
+        border-color: var(--border-hover);
+        box-shadow: var(--card-shadow);
+        background: rgba(255, 255, 255, 0.95);
     }
 
     .status-label {
         margin: 0;
         color: var(--text-muted);
-        font-size: 0.82rem;
+        font-size: 0.75rem;
         font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0;
+        letter-spacing: 0.05em;
     }
 
     .status-value {
-        margin: 0.25rem 0 0;
-        color: #0f172a;
-        font-size: 1.05rem;
+        margin: 0.35rem 0 0;
+        color: #334155;
+        font-size: 1.2rem;
         font-weight: 800;
     }
 
     .section-heading {
-        margin: 1.25rem 0 0.5rem;
-        color: #0f172a;
-        font-size: 1.22rem;
+        margin: 1.5rem 0 0.75rem;
+        color: #1f2937;
+        font-size: 1.35rem;
         font-weight: 800;
-        letter-spacing: 0;
+        letter-spacing: -0.01em;
+        border-left: 4px solid var(--accent);
+        padding-left: 0.75rem;
     }
 
     div[data-testid="stFileUploader"] section {
-        border: 1px dashed #94a3b8;
-        border-radius: 8px;
-        background: rgba(255, 255, 255, 0.82);
+        border: 2px dashed var(--border);
+        border-radius: 12px;
+        background: var(--card-bg);
+        transition: border-color 0.3s ease;
+    }
+    
+    div[data-testid="stFileUploader"] section:hover {
+        border-color: var(--accent);
     }
 
     div[data-testid="stMetric"] {
-        padding: 0.8rem 0.9rem;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: rgba(255, 255, 255, 0.88);
-        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+        padding: 1rem 1.25rem !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 12px !important;
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(240, 249, 255, 0.7) 100%) !important;
+        box-shadow: 0 4px 15px rgba(14, 165, 233, 0.04) !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-2px);
+        border-color: var(--border-hover) !important;
+        box-shadow: var(--card-shadow) !important;
+    }
+
+    div[data-testid="stMetricLabel"] {
+        white-space: normal !important;
+        overflow: visible !important;
+        word-break: break-word !important;
+        font-size: 0.85rem !important;
+        font-weight: 700 !important;
+        color: var(--text-muted) !important;
+        line-height: 1.3 !important;
+        min-height: 2.2rem;
+    }
+
+    div[data-testid="stMetricValue"] {
+        font-size: 1.8rem !important;
+        font-weight: 800 !important;
+        color: #334155 !important;
+        margin-top: 0.25rem !important;
     }
 
     .stTabs [data-baseweb="tab-list"] {
         gap: 0.5rem;
+        border-bottom: 2px solid var(--border);
+        padding-bottom: 2px;
     }
 
     .stTabs [data-baseweb="tab"] {
-        height: 2.7rem;
-        padding: 0 1rem;
+        height: 2.8rem;
+        padding: 0 1.25rem;
         border: 1px solid var(--border);
-        border-radius: 8px;
-        background: rgba(255, 255, 255, 0.78);
-        color: #334155;
+        border-bottom: none;
+        border-radius: 8px 8px 0 0;
+        background: rgba(240, 249, 255, 0.5);
+        color: var(--text-muted);
         font-weight: 700;
+        transition: all 0.2s ease;
+    }
+
+    .stTabs [data-baseweb="tab"]:hover {
+        background: rgba(224, 242, 254, 0.7);
+        color: var(--accent);
     }
 
     .stTabs [data-baseweb="tab"] p {
@@ -225,13 +321,40 @@ def load_css():
     }
 
     .stTabs [aria-selected="true"] {
-        border-color: var(--accent);
-        color: var(--accent);
-        background: #eff6ff;
+        border-color: var(--accent) var(--accent) transparent var(--accent);
+        color: var(--accent-hover) !important;
+        background: #ffffff !important;
+        font-weight: 800;
     }
 
     button[kind="primary"] {
-        border-radius: 8px;
+        border-radius: 8px !important;
+        background-color: var(--accent) !important;
+        color: white !important;
+        border: none !important;
+        font-weight: 700 !important;
+        padding: 0.5rem 1.5rem !important;
+        transition: all 0.2s ease !important;
+    }
+
+    button[kind="primary"]:hover {
+        background-color: var(--accent-hover) !important;
+        box-shadow: 0 4px 12px rgba(14, 165, 233, 0.25) !important;
+    }
+
+    button[kind="secondary"] {
+        border-radius: 8px !important;
+        border: 1px solid var(--border) !important;
+        background-color: white !important;
+        color: var(--text-main) !important;
+        font-weight: 600 !important;
+        transition: all 0.2s ease !important;
+    }
+
+    button[kind="secondary"]:hover {
+        border-color: var(--accent) !important;
+        color: var(--accent) !important;
+        background-color: var(--surface-soft) !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -750,7 +873,7 @@ def process_video(video_path, confidence_threshold, iou_threshold, skip_frames=5
     safety_rate = (total_helmet / total_objects * 100) if total_objects > 0 else 0
 
     # Hiển thị thống kê video
-    st.markdown("### 📊 Thống kê video")
+    st.markdown('<div class="section-heading">Thống kê video</div>', unsafe_allow_html=True)
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
@@ -791,6 +914,7 @@ def generate_report():
 
 # ======================== SIDEBAR ========================
 with st.sidebar:
+    render_sidebar_navigation()
     st.title("Helmet AI")
     st.caption("Bảng điều khiển nhận diện vi phạm")
     
@@ -881,6 +1005,73 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+st.markdown('<div class="section-heading">Bảng điều khiển thống kê vi phạm</div>', unsafe_allow_html=True)
+violation_df = load_violation_records()
+violation_counts = dashboard_counts(violation_df)
+
+metric_cols = st.columns(5)
+metric_cols[0].metric("Tổng số vi phạm", violation_counts["total"])
+metric_cols[1].metric("Đã băm SHA-256", violation_counts["hashed"])
+metric_cols[2].metric("Chưa băm SHA-256", violation_counts["missing_hash"])
+metric_cols[3].metric("Giao dịch Blockchain", violation_counts["blockchain"])
+metric_cols[4].metric("Vi phạm trong ngày", violation_counts["today"])
+
+if violation_df.empty:
+    st.info("Chưa có dữ liệu vi phạm trong database.")
+else:
+    normalized_violations = normalize_violation_df(violation_df)
+    overview_tab, chart_tab, search_tab = st.tabs(
+        ["Danh sách gần nhất", "Thống kê theo ngày", "Tìm theo hash"]
+    )
+
+    with overview_tab:
+        latest_violations = normalized_violations[
+            ["id", "display_time", "violation_type", "confidence", "image_hash", "blockchain_tx"]
+        ].head(8)
+        latest_violations.columns = [
+            "ID",
+            "Thời gian",
+            "Loại vi phạm",
+            "Độ tin cậy",
+            "SHA-256",
+            "Blockchain TX",
+        ]
+        st.dataframe(latest_violations, width="stretch", hide_index=True)
+
+    with chart_tab:
+        daily_stats = stats_by_date(violation_df)
+        if daily_stats.empty:
+            st.info("Chưa có dữ liệu thống kê theo ngày.")
+        else:
+            st.bar_chart(daily_stats.set_index("Ngày"))
+
+    with search_tab:
+        hash_search = st.text_input("Tìm theo hash", key="main_hash_search")
+        if hash_search:
+            query = hash_search.strip().lower()
+            matches = normalized_violations[
+                normalized_violations["image_hash"].fillna("").str.lower().str.contains(query, regex=False)
+                | normalized_violations["blockchain_tx"].fillna("").str.lower().str.contains(query, regex=False)
+            ]
+
+            if matches.empty:
+                st.warning("Không tìm thấy bản ghi phù hợp.")
+            else:
+                for _, row in matches.head(5).iterrows():
+                    result_image = resolve_image_path(row["image_path"])
+                    col_img, col_info = st.columns([1, 2])
+                    with col_img:
+                        if result_image.exists():
+                            st.image(str(result_image), width="stretch")
+                        else:
+                            st.caption("Không tìm thấy ảnh.")
+                    with col_info:
+                        st.write(f"**ID:** {row['id']}")
+                        st.write(f"**Thời gian:** {row['display_time']}")
+                        st.write("**Transaction Blockchain:**")
+                        st.code(str(row.get("blockchain_tx") or ""))
+                    st.divider()
 
 st.markdown('<div class="section-heading">Nguồn dữ liệu</div>', unsafe_allow_html=True)
 image_tab, video_tab = st.tabs(["Hình ảnh", "Video"])
